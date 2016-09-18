@@ -1,0 +1,299 @@
+---
+title: "Getting started with summarizing Motus .Rds detection files"
+author: "Zoe Crysler and Tara Crewe"
+date: "September 1, 2016"
+output: word_document
+---
+
+This document provides some R code and associated output for Motus users to get started with their Motus detections data.
+
+# Load R Packages
+
+First, we load require R packages.  If you do not have these packages installed, you will need to first install them using, e.g., > install.packages("plyr").
+
+```{r Load Packages, message = FALSE}
+
+require(plyr)
+require(ggplot2)
+require(ggmap)
+require(RgoogleMaps)
+require(lubridate)
+
+```
+
+# Import and manage RDS tag detection file  
+
+When the data are imported, the tag "id" is an integer, so we change the format to a factor.  For ease of plotting later, we also order site factor levels based on latitude, then sort the full dataframe by time stamp so that movement tracks are connected in chronological order.  Here we import and summarize a subset of data on shorebirds tagged in James Bay, Ontario, Canada, and is provided for this purpose courtesy of the James Bay Shorebird Monitoring Project - Environment and Climate Change Canada. Permission to use the data for any other purpose should be requested from the data owners.
+
+```{r Import RDS File, message = FALSE}
+
+tags <- readRDS("F:/RScripts/Data/2015_JamesBay_globaltags_small.rds") 
+
+tags$id <- as.factor(tags$id) 
+tags <- within(tags, site <- reorder(site, (lat))) 
+tags <- tags[order(tags$ts),] 
+
+```
+
+# Playing with dates
+
+Dates can be confusing to work with, and there are a variety of ways to deal with them.  Here we use strptime() to create a date variable by removing the time (hour, minutes, seconds) from the time stamp.  The plyr() package can be used to round a time stamp to the nearest seconds if, for example, you want to group detections into time bins.  Note also that RDS files generally come in GMT, and can be summarized using this time zone, or adjusted to your current time zone (we leave it as is here).
+
+```{r dates}
+
+tags$date <- strptime(tags$ts, "%Y-%m-%d") 
+tags$date <- as.POSIXct(tags$date) ## removes time from ts 
+
+tags$ts_10 <- plyr::round_any(tags$ts, 10) ## rounds time stamp to nearest 10 second
+
+difftime(max(tags$ts), min(tags$ts), units = "days") # number of days between first and last detection
+```
+
+Now, a few examples of extracting information on dates using lubridate(), and checking to see if the times that two individuals spent at the Longridge site overlapped.
+
+```{r lubridate}
+
+tags$year <- year(tags$ts)
+tags$month <- month(tags$ts)
+tags$mday <- day(tags$ts) # day of the month
+tags$wday <- wday(tags$ts) # weekday
+tags$yday <- yday(tags$ts) # day of the year
+tags$hour <- hour(tags$ts)
+tags$minute <- minute(tags$ts)
+tags$second <- second(tags$ts)
+
+# get time intervals that two birds were at Longridge, and see if the time intervals overlapped:
+
+int.174 <- with(subset(tags, id == 171 & site == "Longridge"), interval(min(ts), max(ts)))
+int.376 <- with(subset(tags, id == 378 & site == "Longridge"), interval(min(ts), max(ts)))
+int_overlaps(int.174, int.376) # these birds did not overlap at Longridge
+
+```
+
+# Summary statistics
+
+## Tags detected at each site
+
+Create a simple table to show which tags (columns) were detected at each site (rows).
+
+```{r tags by site}
+
+with(tags, table(site, id))
+
+```
+
+## Number of tags and detections at each site
+
+To summarize the number of tags and detections at each site, we use ddply() to create a new dataframe 'sum1'with two new columns: 'num.birds', which is the number of unique tag id's detected at each site; and 'num.det', which is the total number of detections for each site across all tags.  You can then use view() to have the resulting data pop up in a new window in RStudio, or, as done here, simply type 'sum1' to print it to the R console.
+
+```{r Site summaries}
+
+sum1 <- ddply(tags, .(site), 
+               summarize,
+               num.birds = length(unique(fullID)), 
+               num.det = length(ts)) 
+#View(sum1) 
+sum1
+```
+
+We then use ggplot() to visualize these summaries.
+
+**Figure 1**. Bar plot showing the total number of detections at each site, across all tags. 
+
+```{r n detections by site}
+
+p <- ggplot(sum1, aes(site, num.det))
+p + geom_bar(stat = "identity") + theme_bw() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  ## make x-axis labels on a 45º angle to read more easily
+  labs(x= "Site", y = "Total detections") ## changes x- and y-axis label
+```
+
+**Figure 2**. Bar plot showing the number of unique tags detected at each site.
+
+```{r bar plot n tags by site}
+
+p <- ggplot(sum1, aes(site, num.birds))
+p + geom_bar(stat = "identity") + theme_bw() + ## creates bar plot by site
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ## make x-axis labels on a 45º angle to read more easily
+  labs(x= "Site", y = "Number of birds") ## changes x- and y-axis label
+
+```
+
+## Number of tags and detections each day at a specified site (Longridge)
+
+To summarize the number of tags and detections at a specific site across days, we use the date variable (with hour and minute removed) to allow grouping by day. We then use ddply() to summarize a subset of the dataset 'tags' (site = "Longridge") and create a new dataframe 'sum2' which contains two new columns: 'num.birds', which gives the number of unique tag id's for each site and day; and 'num.det', which gives the total number of detections by site and day.
+
+```{r tags and detections by site}
+
+sum2 <- ddply(subset(tags, site == "Longridge"), .(site, date), 
+                summarize,
+                num.birds = length(unique(fullID)), 
+                num.det = length(ts)) 
+
+#View(sum2) ## view output in separate RStudio window
+sum2
+```
+
+Again, we use ggplot to visualize the summaries.
+
+**Figure 3**. Bar plot of the total number of detections each day at Longridge, across all tags.
+
+```{r n detections Longridge}
+
+p <- ggplot(sum2, aes(date, num.det))
+p + geom_bar(stat = "identity") + theme_bw() + ## creates bar plot by site
+  labs(title = "Longridge", x= "Date", y = "Total detections") ## changes title, x- and y-axis label
+```
+
+**Figure 4**.  Line plot showing the total number of tags (birds) detected each day at the Longridge site.
+
+```{r n tags Longridge}
+
+p <- ggplot(sum2, aes(date, num.birds))
+p + geom_line() + theme_bw() + ## creates line graph by site
+  labs(title = "Longridge", x= "Date", y = "Number of birds") ## changes title, x- and y-axis label
+```
+
+## Timing of detections at each site
+
+We may be interested in the timing of detections at each site.  Here we ddply to summarize min, max and the time between first and last detections at each site (across all tags).
+
+```{r detections by site}
+
+sum3 <- ddply(tags, .(site), ## applies below function  to dataframe "tags" grouped by "site"
+               summarize,
+               first.ts = min(ts), ## creates new column "first.ts" that isolates first detection at each site
+               last.ts = max(ts), ## creates new column "last.ts" that isolates last detection at each site
+               range = paste(first.ts, last.ts, sep = " - "), ## creates new column of date range by pasting first and last detection timestamp
+               tot.ts = difftime(last.ts, first.ts, units = "days")) ## determines length of time between first and last detections by number of days
+#View(sum3)
+sum3
+
+mean <- mean(sum3$tot.ts) ## mean time
+mean  # print mean
+N <- length(sum3$tot.ts) ## number of observations
+N    # print N
+sd <- sd(sum3$tot.ts) ## SD of time
+sd  # print sd
+se <- sd / sqrt(N) ## SE of time
+se  # print se
+
+```
+
+# Visualizing movement of tags
+
+A quick and easy way to visualize the position of tags over time is to plot detections by latitude or longitude.
+
+**Figure 5**. Plot of all detections by latitude, faceted by tag id.
+
+```{r detect by lat, message = FALSE}
+
+p <- ggplot(subset(tags), aes(x = ts, y = lat)) 
+p + geom_point(pch = 21) + theme_bw() + facet_wrap(~id, ncol = 4) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+
+**Figure 6**. Plot of all detections by latitude, with colour representing tag id.  Lines are added to visualize the tracks of individuals.
+
+```{r plot detect by lat id, message = FALSE}
+
+p <- ggplot(tags, aes(ts, lat, colour = id)) 
+p + geom_point(pch = 21) + theme_bw() + geom_line()
+#  theme(legend.title=element_blank()) ## removes legend title
+
+```
+
+**Figure 7**.  Plot of signal strength over time for tag 378 at the Piskwamish site.  Colours represent signal strength at the different antenna.
+
+```{r signalstrength by site id, message = FALSE}
+
+p <- ggplot(subset(tags, id == "378" & site == "Piskwamish"), aes(ts, sig, colour = ant))
+p + geom_point(pch = 21) + theme_bw() +
+  labs(title = "Tag 378 at Piskwamish") +
+  xlab("Time") + ylab("Signal strength")## adds title to plot
+
+```
+
+**Figure 8**. Plot of the change in latitude over time for tag 181.
+
+```{r id by lat, message = FALSE}
+
+p <- ggplot(subset(tags, id == "181"), aes(ts, lat))
+p + geom_point(pch = 21) + theme_bw() +
+  labs(title = "Tag 181") + ## adds title to plot
+  theme(axis.title.x=element_blank(), axis.title.y=element_blank()) ## removes x and y axis labels
+
+```
+
+**Figure 9**. Plot of the movement of tag 181 among sites, where sites are ordered by latitude, with more northern sites at the top of the plot.
+
+```{r id by site lat}
+
+p <- ggplot(subset(tags, id == "181"), aes(ts, site))
+p + geom_point(pch = 21) + theme_bw() +
+  labs(title = "Tag 181") + ## adds title to plot
+  theme(axis.title.x=element_blank(), axis.title.y=element_blank()) ## removes x and y axis labels
+
+```
+
+**Figure 10**.  Signal strength for tag 181 during a specified time interval.  Colour specifies the antenna, and shape specifies the site associated with the detections.  In this case, tag 181 was detected by only one antenna during the specified time interval.
+
+```{r plot time slot}
+
+p <- ggplot(subset(tags, id == "181" & ts > as.POSIXct("2015-09-02 09:00") & ts < as.POSIXct("2015-09-02 10:00")), 
+            aes(ts, sig, colour = ant, shape = site))
+p + geom_point() + theme_bw()
+
+```
+
+**Figure 11**.  As with Figure 10, but over a different time interval, with colour specifying the antenna and shape specifying the site with detections.  In this case the individual was detected by two antenna at the Lookspt site.
+
+```{r plot time by id antenna}
+
+p <- ggplot(subset(tags, id == "181" & ts > as.POSIXct("2015-09-02 06:00") & ts < as.POSIXct("2015-09-02 09:00")), 
+            aes(ts, sig, colour = ant, shape = site))
+p + geom_point() + theme_bw() 
+
+```
+
+**Figure 12**. Signal strength of tag 181 during one night, faceted by site, and with colour representing antenna at each site.
+
+```{r plot signalstrength by tag night}
+
+p <- ggplot(subset(tags, id == "181" & ts > as.POSIXct("2015-09-02") & ts < as.POSIXct("2015-09-03")), aes(ts, sig, colour = ant))
+p + geom_point(pch = 21) + theme_bw() + facet_grid(site~.)
+
+```
+
+# Map Detections
+
+Create a base map to overlay movement tracks on:
+
+```{r base map, message = FALSE}
+
+gmap <-  get_map(location = c(lon = -72, lat = 45), ## lat/lon to center map around
+                 maptype = "hybrid", ## other options include "terrain", "satellite", "roadmap"
+                 source = "google",
+                 zoom = 5) ## higher numbers zoom in more
+```
+
+**Figure 13**. Map all tag tracks, with colours regresenting tag ID.
+
+```{r map tag tracks by id}
+
+p <- ggmap(gmap)
+p + geom_path(data=tags, aes(lon, lat, group=fullID, col = fullID)) + ## group will connect lines based on fullID
+  labs(x = "Longitude", y = "Latitude", col = "ID") + theme_bw() + 
+  theme(legend.position = "none") ## removes legend
+```
+
+**Figure 14**. Map the track of tag ID 181.
+
+```{r map tag track}
+
+p <- ggmap(gmap)
+p + geom_path(data=subset(tags, id == "181"), aes(lon, lat,group=fullID, col = fullID)) + ## group will connect lines based on fullID
+  labs(title = "Tag 181", x = "Longitude", y = "Latitude", col = "ID") + theme_bw() + 
+  theme(legend.position = "none") ## removes legend from plot
+```
+
